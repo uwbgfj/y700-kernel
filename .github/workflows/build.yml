@@ -91,8 +91,17 @@ jobs:
           strings arch/arm64/boot/Image | grep -m1 'aa: builtin ready' || echo "WARN no aa string"
           strings arch/arm64/boot/Image | grep -m1 'Linux version'
 
+      - name: 打印符号 CRC 表
+        run: |
+          cd kernel-src
+          echo '===SYMVERS_BEGIN==='
+          cat Module.symvers 2>/dev/null || echo 'NO_SYMVERS'
+          echo '===SYMVERS_END==='
+
       - name: 上传
         uses: actions/upload-artifact@v4
         with:
           name: Image-6.6.139
-          path: kernel-src/arch/arm64/boot/Image
+          path: |
+            kernel-src/arch/arm64/boot/Image
+            kernel-src/Module.symvers
