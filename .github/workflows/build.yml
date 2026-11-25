@@ -55,7 +55,7 @@ jobs:
           cd kernel-src
           git clone --depth 1 https://github.com/LyraVoid/FinaSU.git /tmp/finasu
           rm -rf drivers/kernelsu
-          cp -r /tmp/finasu/kernel drivers/kernelsu
+          cp -rL /tmp/finasu/kernel drivers/kernelsu
           rm -rf drivers/kernelsu/uapi && cp -rL /tmp/finasu/uapi drivers/kernelsu/uapi 2>/dev/null || true
           grep -q 'drivers/kernelsu/Kconfig' drivers/Kconfig || echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
           grep -q 'kernelsu' drivers/Makefile || echo 'obj-$(CONFIG_KSU) += kernelsu/' >> drivers/Makefile
