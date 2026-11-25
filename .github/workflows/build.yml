@@ -6,38 +6,38 @@ on:
 jobs:
   build:
     runs-on: ubuntu-22.04
-    timeout-minutes: 180
+    timeout-minutes: 240
     steps:
       - uses: actions/checkout@v4
 
-      - name: 安装依赖
+      - name: deps
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq build-essential bc bison flex libssl-dev libelf-dev \
             python3 python-is-python3 zip unzip cpio rsync git device-tree-compiler
 
-      - name: 下载 AOSP clang r510928
+      - name: clang
         run: |
           mkdir -p $HOME/tc && cd $HOME/tc
-          curl -L --retry 5 --retry-delay 5 -o clang.zip \
-            https://github.com/cctv18/oneplus_sm8650_toolchain/releases/download/LLVM-Clang18-r510928/clang-r510928.zip
+          curl -L --retry 5 -o clang.zip https://github.com/cctv18/oneplus_sm8650_toolchain/releases/download/LLVM-Clang18-r510928/clang-r510928.zip
           unzip -q clang.zip -d clang18
           echo "$HOME/tc/clang18/bin" >> "$GITHUB_PATH"
           "$HOME/tc/clang18/bin/clang" --version | head -2
 
-      - name: 拉取内核源码
+      - name: kernel-src
         run: |
-          git clone --depth 1 --branch android15-6.6.139_r00 \
-            https://android.googlesource.com/kernel/common kernel-src || \
-          git clone --depth 1 --branch android15-6.6.139_r00 \
-            https://mirrors.tuna.tsinghua.edu.cn/git/AOSP/kernel/common kernel-src
-          cd kernel-src && grep -m1 '^SUBLEVEL' Makefile
+          git clone --depth 1 --branch android15-6.6.139_r00 https://android.googlesource.com/kernel/common kernel-src || \
+          git clone --depth 1 --branch android15-6.6.139_r00 https://mirrors.tuna.tsinghua.edu.cn/git/AOSP/kernel/common kernel-src
+          cd kernel-src
+          git fetch --depth 1 origin 5fe428e1a8cef0227a07ec9d63d31152b7acc757
+          git checkout -q FETCH_HEAD
+          echo "commit: $(git rev-parse --short=12 HEAD)"
+          grep -m1 '^SUBLEVEL' Makefile
 
-      - name: 配置
+      - name: config
         run: |
           cd kernel-src
           cp ../stock-config.txt .config
-          echo '使用设备原厂 config'
           scripts/config --disable LOCALVERSION_AUTO
           scripts/config --enable  LTO_NONE
           scripts/config --disable LTO_CLANG
@@ -47,30 +47,31 @@ jobs:
           scripts/config --disable DEBUG_INFO_BTF_MODULES
           scripts/config --disable TRIM_UNUSED_KSYMS
           scripts/config --enable  MODULE_SCMVERSION
-          scripts/config --enable  CFI_CLANG
+          scripts/config --enable  MODVERSIONS
           make ARCH=arm64 LLVM=1 olddefconfig >/dev/null
-          grep -E '^CONFIG_(LTO_NONE|CFI_CLANG|TRIM_UNUSED_KSYMS|MODULE_SCMVERSION)=' .config
+          for k in MODVERSIONS MODULE_SCMVERSION TRIM_UNUSED_KSYMS LTO_NONE CFI_CLANG; do
+            echo "$k => $(grep -E "^CONFIG_${k}=" .config || echo none)"
+          done
+          true
 
-      - name: 集成 KernelSU
+      - name: ksu
         run: |
           cd kernel-src
           git clone --depth 1 https://github.com/LyraVoid/FinaSU.git /tmp/finasu
           rm -rf drivers/kernelsu
           cp -rL /tmp/finasu/kernel drivers/kernelsu
-          rm -rf drivers/kernelsu/uapi && cp -rL /tmp/finasu/uapi drivers/kernelsu/uapi 2>/dev/null || true
+          mkdir -p drivers/kernelsu/include/uapi drivers/kernelsu/uapi
+          cp -f /tmp/finasu/uapi/*.h drivers/kernelsu/include/uapi/ 2>/dev/null || true
+          cp -f /tmp/finasu/uapi/*.h drivers/kernelsu/uapi/ 2>/dev/null || true
           grep -q 'drivers/kernelsu/Kconfig' drivers/Kconfig || echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
           grep -q 'kernelsu' drivers/Makefile || echo 'obj-$(CONFIG_KSU) += kernelsu/' >> drivers/Makefile
           sed -i 's/^ccflags-y += -DKSU_VERSION=16$/ccflags-y += -DKSU_VERSION=33224/' drivers/kernelsu/Kbuild
           sed -i 's/^KSU_VERSION_FULL := v0.0.0-00000000@unknown$/KSU_VERSION_FULL := v1.7.0-aa0000aa@finasu/' drivers/kernelsu/Kbuild
           scripts/config --enable KSU --enable KALLSYMS_ALL
           make ARCH=arm64 LLVM=1 olddefconfig >/dev/null
-          for k in KSU KALLSYMS_ALL; do
-            v=$(grep -E "^CONFIG_${k}=" .config || echo none)
-            echo "$k => $v"
-          done
-          true
+          echo "KSU => $(grep -E '^CONFIG_KSU=' .config || echo none)"
 
-      - name: 注入自研驱动
+      - name: inject-aa
         run: |
           cd kernel-src
           cp ../aa_builtin.c drivers/misc/aa_builtin.c
@@ -78,30 +79,41 @@ jobs:
             echo 'obj-y += aa_builtin.o' >> drivers/misc/Makefile
             echo 'CFLAGS_aa_builtin.o := -Wno-incompatible-pointer-types' >> drivers/misc/Makefile
           }
-          echo "injected"
+          echo injected
 
-      - name: 编译
+      - name: allow-any-vermagic
+        run: |
+          cd kernel-src
+          python3 - <<'PY'
+          import pathlib
+          p = pathlib.Path('kernel/module/version.c')
+          s = p.read_text()
+          key = 'int same_magic(const char *amagic, const char *bmagic,'
+          if 'aa: allow any vermagic' not in s:
+              i = s.index(key)
+              j = s.index('{', i) + 1
+              s = s[:j] + '\n\treturn 1; /* aa: allow any vermagic */' + s[j:]
+              p.write_text(s)
+          print('patched:', 'aa: allow any vermagic' in p.read_text())
+          PY
+
+      - name: build
         run: |
           cd kernel-src
           export PATH="$HOME/tc/clang18/bin:$PATH"
           make ARCH=arm64 LLVM=1 -j"$(nproc)" \
             KERNELRELEASE="6.6.139-android15-8-g5fe428e1a8cef-ab10031985-4k" \
-            Image 2>&1 | tail -30
+            Image 2>&1 | tail -40
           ls -l arch/arm64/boot/Image
-          strings arch/arm64/boot/Image | grep -m1 'aa: builtin ready' || echo "WARN no aa string"
           strings arch/arm64/boot/Image | grep -m1 'Linux version'
 
-      - name: 打印符号 CRC 表
+      - name: crc
         run: |
           cd kernel-src
-          echo '===SYMVERS_BEGIN==='
-          cat Module.symvers 2>/dev/null || echo 'NO_SYMVERS'
-          echo '===SYMVERS_END==='
+          python3 ../crc_step.py
 
-      - name: 上传
+      - name: upload
         uses: actions/upload-artifact@v4
         with:
           name: Image-6.6.139
-          path: |
-            kernel-src/arch/arm64/boot/Image
-            kernel-src/Module.symvers
+          path: kernel-src/arch/arm64/boot/Image
