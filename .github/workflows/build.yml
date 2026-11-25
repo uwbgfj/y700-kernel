@@ -27,16 +27,17 @@ jobs:
 
       - name: 拉取内核源码
         run: |
-          git clone --depth 1 --branch android15-6.6-2026-07_r5 \
+          git clone --depth 1 --branch android15-6.6.139_r00 \
             https://android.googlesource.com/kernel/common kernel-src || \
-          git clone --depth 1 --branch android15-6.6-2026-07_r5 \
+          git clone --depth 1 --branch android15-6.6.139_r00 \
             https://mirrors.tuna.tsinghua.edu.cn/git/AOSP/kernel/common kernel-src
           cd kernel-src && grep -m1 '^SUBLEVEL' Makefile
 
       - name: 配置
         run: |
           cd kernel-src
-          make ARCH=arm64 LLVM=1 gki_defconfig >/dev/null
+          cp ../stock-config.txt .config
+          echo '使用设备原厂 config'
           scripts/config --disable LOCALVERSION_AUTO
           scripts/config --enable  LTO_NONE
           scripts/config --disable LTO_CLANG
@@ -84,7 +85,7 @@ jobs:
           cd kernel-src
           export PATH="$HOME/tc/clang18/bin:$PATH"
           make ARCH=arm64 LLVM=1 -j"$(nproc)" \
-            KERNELRELEASE="6.6.139-android15-8-g5d4cdf2ffe45-ab16023396-4k" \
+            KERNELRELEASE="6.6.139-android15-8-g5fe428e1a8cef-ab10031985-4k" \
             Image 2>&1 | tail -30
           ls -l arch/arm64/boot/Image
           strings arch/arm64/boot/Image | grep -m1 'aa: builtin ready' || echo "WARN no aa string"
