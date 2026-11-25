@@ -47,7 +47,7 @@ jobs:
           scripts/config --disable DEBUG_INFO_BTF_MODULES
           scripts/config --disable TRIM_UNUSED_KSYMS
           scripts/config --enable  MODULE_SCMVERSION
-          scripts/config --disable MODVERSIONS
+          scripts/config --enable  MODVERSIONS
           make ARCH=arm64 LLVM=1 olddefconfig >/dev/null
           for k in MODVERSIONS MODULE_SCMVERSION TRIM_UNUSED_KSYMS LTO_NONE CFI_CLANG; do
             echo "$k => $(grep -E "^CONFIG_${k}=" .config || echo none)"
@@ -94,7 +94,17 @@ jobs:
               j = s.index('{', i) + 1
               s = s[:j] + '\n\treturn 1; /* aa: allow any vermagic */' + s[j:]
               p.write_text(s)
-          print('patched:', 'aa: allow any vermagic' in p.read_text())
+          print('patched same_magic:', 'aa: allow any vermagic' in p.read_text())
+
+          v = pathlib.Path('kernel/module/version.c')
+          t = v.read_text()
+          if 'aa: skip crc' not in t:
+              key2 = 'int check_version(const struct load_info *info,'
+              i2 = t.index(key2)
+              j2 = t.index('{', i2) + 1
+              t = t[:j2] + '\n\treturn 1; /* aa: skip crc */' + t[j2:]
+              v.write_text(t)
+          print('patched check_version:', 'aa: skip crc' in v.read_text())
           PY
 
       - name: build
