@@ -1,0 +1,81 @@
+name: Build v10 Fidelity
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq build-essential bc bison flex libssl-dev libelf-dev \
+            python3 python-is-python3 zip unzip cpio rsync git device-tree-compiler
+
+      - name: clang
+        run: |
+          mkdir -p $HOME/tc && cd $HOME/tc
+          curl -L --retry 5 -o clang.zip https://github.com/cctv18/oneplus_sm8650_toolchain/releases/download/LLVM-Clang18-r510928/clang-r510928.zip
+          unzip -q clang.zip -d clang18
+          echo "$HOME/tc/clang18/bin" >> "$GITHUB_PATH"
+          "$HOME/tc/clang18/bin/clang" --version | head -1
+
+      - name: kernel-src
+        run: |
+          git clone --depth 1 --branch android15-6.6.139_r00 https://mirrors.tuna.tsinghua.edu.cn/git/AOSP/kernel/common kernel-src
+          cd kernel-src
+          git fetch --depth 1 origin 5fe428e1a8cef0227a07ec9d63d31152b7acc757
+          git checkout -q FETCH_HEAD
+          echo "commit: $(git rev-parse --short=12 HEAD)"
+          git apply ../kabi-sysvipc.patch && echo "kABI 补丁已应用"
+          grep -c "ANDROID_KABI_USE(6" include/linux/sched.h
+
+      - name: config
+        run: |
+          cd kernel-src
+          cp ../stock-config.txt .config
+          cat ../fragment.config >> .config
+          openssl req -new -x509 -nodes -sha256 -days 36500 \
+            -key ../testkey_rsa4096.pem -subj "/CN=Android Test Key" -out /tmp/tk.crt
+          cat /tmp/tk.crt ../testkey_rsa4096.pem > certs/testkey_rsa4096.pem
+          sed -i 's|^CONFIG_MODULE_SIG_KEY=.*|CONFIG_MODULE_SIG_KEY="certs/testkey_rsa4096.pem"|' .config
+          scripts/config --disable LOCALVERSION_AUTO
+          scripts/config --disable DEBUG_INFO_BTF
+          scripts/config --disable DEBUG_INFO_BTF_MODULES
+          scripts/config --disable TRIM_UNUSED_KSYMS
+          scripts/config --disable WERROR
+          scripts/config --enable  MODULE_SCMVERSION
+          scripts/config --enable  MODVERSIONS
+          scripts/config --enable  MODULE_SIG
+          yes "" | make ARCH=arm64 LLVM=1 HOSTCC=gcc HOSTLD=gcc olddefconfig >/dev/null
+          for k in MODVERSIONS MODULE_SCMVERSION MODULE_SIG LTO_CLANG_THIN CFI_CLANG TRIM_UNUSED_KSYMS; do
+            echo "$k => $(grep -E "^CONFIG_${k}=" .config || echo none)"
+          done
+          grep -E '^CONFIG_MODULE_SIG_KEY=' .config
+          true
+
+      - name: build
+        run: |
+          cd kernel-src
+          export KCFLAGS="-D__ANDROID_COMMON_KERNEL__"
+          make ARCH=arm64 LLVM=1 HOSTCC=gcc HOSTLD=gcc -j"$(nproc)" \
+            KERNELRELEASE="6.6.139-android15-8-g5fe428e1a8cef-ab10031985-4k" \
+            Image 2>&1 | tail -40
+          ls -l arch/arm64/boot/Image
+          grep -m1 " verify_pkcs7_signature" System.map || echo "⚠ PKCS7 符号缺失"
+          strings arch/arm64/boot/Image | grep -m1 'Linux version'
+
+      - name: crc
+        run: |
+          cd kernel-src
+          python3 ../crc_step.py
+
+      - name: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: Image-v10
+          path: kernel-src/arch/arm64/boot/Image
