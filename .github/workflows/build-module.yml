@@ -60,7 +60,7 @@ jobs:
           mkdir -p ../mods
           cp ../hello.c ../mods/
           printf 'obj-m := hello.o\n' > ../mods/Makefile
-          make ARCH=arm64 LLVM=1 KERNELRELEASE="6.6.139-android15-8-g5fe428e1a8cef-ab10031985-4k" M=$PWD/../mods modules
+          make ARCH=arm64 LLVM=1 KBUILD_MODPOST_WARN=1 KERNELRELEASE="6.6.139-android15-8-g5fe428e1a8cef-ab10031985-4k" M=$PWD/../mods modules
           echo '--- vermagic:'
           strings ../mods/hello.ko | grep -m1 vermagic
           ls -l ../mods/hello.ko
