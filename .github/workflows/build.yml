@@ -62,7 +62,11 @@ jobs:
           sed -i 's/^KSU_VERSION_FULL := v0.0.0-00000000@unknown$/KSU_VERSION_FULL := v1.7.0-aa0000aa@finasu/' drivers/kernelsu/Kbuild
           scripts/config --enable KSU --enable KALLSYMS_ALL
           make ARCH=arm64 LLVM=1 olddefconfig >/dev/null
-          grep -E '^CONFIG_(KSU|KALLSYMS_ALL)=' .config
+          for k in KSU KALLSYMS_ALL; do
+            v=$(grep -E "^CONFIG_${k}=" .config || echo none)
+            echo "$k => $v"
+          done
+          true
 
       - name: 注入自研驱动
         run: |
