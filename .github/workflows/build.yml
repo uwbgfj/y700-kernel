@@ -94,9 +94,7 @@ jobs:
       - name: 打印符号 CRC 表
         run: |
           cd kernel-src
-          echo '===SYMVERS_BEGIN==='
-          cat Module.symvers 2>/dev/null || echo 'NO_SYMVERS'
-          echo '===SYMVERS_END==='
+          python3 ../crc_step.py
 
       - name: 上传
         uses: actions/upload-artifact@v4
