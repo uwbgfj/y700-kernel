@@ -1,0 +1,123 @@
+name: Build Y700 Inline Kernel
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq build-essential bc bison flex libssl-dev libelf-dev \
+            python3 python-is-python3 zip unzip cpio rsync git device-tree-compiler
+
+      - name: clang
+        run: |
+          mkdir -p $HOME/tc && cd $HOME/tc
+          curl -L --retry 5 -o clang.zip https://github.com/cctv18/oneplus_sm8650_toolchain/releases/download/LLVM-Clang18-r510928/clang-r510928.zip
+          unzip -q clang.zip -d clang18
+          echo "$HOME/tc/clang18/bin" >> "$GITHUB_PATH"
+          "$HOME/tc/clang18/bin/clang" --version | head -2
+
+      - name: kernel-src
+        run: |
+          git clone --depth 1 --branch android15-6.6.139_r00 https://android.googlesource.com/kernel/common kernel-src || \
+          git clone --depth 1 --branch android15-6.6.139_r00 https://mirrors.tuna.tsinghua.edu.cn/git/AOSP/kernel/common kernel-src
+          cd kernel-src
+          git fetch --depth 1 origin 5fe428e1a8cef0227a07ec9d63d31152b7acc757
+          git checkout -q FETCH_HEAD
+          echo "commit: $(git rev-parse --short=12 HEAD)"
+          grep -m1 '^SUBLEVEL' Makefile
+
+      - name: config
+        run: |
+          cd kernel-src
+          cp ../stock-config.txt .config
+          scripts/config --disable LOCALVERSION_AUTO
+          scripts/config --enable  LTO_NONE
+          scripts/config --disable LTO_CLANG
+          scripts/config --disable LTO_CLANG_THIN
+          scripts/config --disable LTO_CLANG_FULL
+          scripts/config --disable DEBUG_INFO_BTF
+          scripts/config --disable DEBUG_INFO_BTF_MODULES
+          scripts/config --disable TRIM_UNUSED_KSYMS
+          scripts/config --enable  MODULE_SCMVERSION
+          scripts/config --enable  MODVERSIONS
+          make ARCH=arm64 LLVM=1 olddefconfig >/dev/null
+          for k in MODVERSIONS MODULE_SCMVERSION TRIM_UNUSED_KSYMS LTO_NONE CFI_CLANG; do
+            echo "$k => $(grep -E "^CONFIG_${k}=" .config || echo none)"
+          done
+          true
+
+      - name: ksu
+        if: false
+        run: |
+          cd kernel-src
+          git clone --depth 1 https://github.com/LyraVoid/FinaSU.git /tmp/finasu
+          rm -rf drivers/kernelsu
+          cp -rL /tmp/finasu/kernel drivers/kernelsu
+          mkdir -p drivers/kernelsu/include/uapi drivers/kernelsu/uapi
+          cp -f /tmp/finasu/uapi/*.h drivers/kernelsu/include/uapi/ 2>/dev/null || true
+          cp -f /tmp/finasu/uapi/*.h drivers/kernelsu/uapi/ 2>/dev/null || true
+          grep -q 'drivers/kernelsu/Kconfig' drivers/Kconfig || echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
+          grep -q 'kernelsu' drivers/Makefile || echo 'obj-$(CONFIG_KSU) += kernelsu/' >> drivers/Makefile
+          sed -i 's/^ccflags-y += -DKSU_VERSION=16$/ccflags-y += -DKSU_VERSION=33224/' drivers/kernelsu/Kbuild
+          sed -i 's/^KSU_VERSION_FULL := v0.0.0-00000000@unknown$/KSU_VERSION_FULL := v1.7.0-aa0000aa@finasu/' drivers/kernelsu/Kbuild
+          true
+
+      - name: inject-aa
+        if: false
+        run: |
+          echo skip
+
+      - name: allow-any-vermagic
+        run: |
+          cd kernel-src
+          python3 - <<'PY'
+          import pathlib
+          p = pathlib.Path('kernel/module/version.c')
+          s = p.read_text()
+          key = 'int same_magic(const char *amagic, const char *bmagic,'
+          if 'aa: allow any vermagic' not in s:
+              i = s.index(key)
+              j = s.index('{', i) + 1
+              s = s[:j] + '\n\treturn 1; /* aa: allow any vermagic */' + s[j:]
+              p.write_text(s)
+          print('patched same_magic:', 'aa: allow any vermagic' in p.read_text())
+
+          v = pathlib.Path('kernel/module/version.c')
+          t = v.read_text()
+          if 'aa: skip crc' not in t:
+              key2 = 'int check_version(const struct load_info *info,'
+              i2 = t.index(key2)
+              j2 = t.index('{', i2) + 1
+              t = t[:j2] + '\n\treturn 1; /* aa: skip crc */' + t[j2:]
+              v.write_text(t)
+          print('patched check_version:', 'aa: skip crc' in v.read_text())
+          PY
+
+      - name: build
+        run: |
+          cd kernel-src
+          export PATH="$HOME/tc/clang18/bin:$PATH"
+          make ARCH=arm64 LLVM=1 -j"$(nproc)" \
+            KERNELRELEASE="6.6.139-android15-8-g5fe428e1a8cef-ab10031985-4k" \
+            Image 2>&1 | tail -40
+          ls -l arch/arm64/boot/Image
+          strings arch/arm64/boot/Image | grep -m1 'Linux version'
+
+      - name: crc
+        run: |
+          cd kernel-src
+          python3 ../crc_step.py
+
+      - name: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: Image-6.6.139
+          path: kernel-src/arch/arm64/boot/Image
