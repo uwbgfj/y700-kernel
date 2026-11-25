@@ -1,0 +1,72 @@
+name: Build Module (r510928)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq build-essential bc bison flex libssl-dev libelf-dev \
+            python3 python-is-python3 zip unzip cpio rsync git device-tree-compiler
+
+      - name: clang
+        run: |
+          mkdir -p $HOME/tc && cd $HOME/tc
+          curl -L --retry 5 -o clang.zip https://github.com/cctv18/oneplus_sm8650_toolchain/releases/download/LLVM-Clang18-r510928/clang-r510928.zip
+          unzip -q clang.zip -d clang18
+          echo "$HOME/tc/clang18/bin" >> "$GITHUB_PATH"
+          "$HOME/tc/clang18/bin/clang" --version | head -1
+
+      - name: kernel-src
+        run: |
+          git clone --depth 1 --branch android15-6.6.139_r00 https://android.googlesource.com/kernel/common kernel-src || \
+          git clone --depth 1 --branch android15-6.6.139_r00 https://mirrors.tuna.tsinghua.edu.cn/git/AOSP/kernel/common kernel-src
+          cd kernel-src
+          git fetch --depth 1 origin 5fe428e1a8cef0227a07ec9d63d31152b7acc757
+          git checkout -q FETCH_HEAD
+          git rev-parse --short=12 HEAD
+
+      - name: config
+        run: |
+          cd kernel-src
+          cp ../stock-config.txt .config
+          scripts/config --disable LOCALVERSION_AUTO
+          scripts/config --disable DEBUG_INFO_BTF
+          scripts/config --disable DEBUG_INFO_BTF_MODULES
+          scripts/config --disable TRIM_UNUSED_KSYMS
+          scripts/config --enable  MODULE_SCMVERSION
+          scripts/config --enable  MODVERSIONS
+          make ARCH=arm64 LLVM=1 olddefconfig >/dev/null
+          for k in MODVERSIONS MODULE_SCMVERSION TRIM_UNUSED_KSYMS; do
+            echo "$k => $(grep -E "^CONFIG_${k}=" .config || echo none)"
+          done
+          true
+
+      - name: prepare
+        run: |
+          cd kernel-src
+          make ARCH=arm64 LLVM=1 KERNELRELEASE="6.6.139-android15-8-g5fe428e1a8cef-ab10031985-4k" modules_prepare
+
+      - name: build-modules
+        run: |
+          cd kernel-src
+          mkdir -p ../mods
+          cp ../hello.c ../mods/
+          printf 'obj-m := hello.o\n' > ../mods/Makefile
+          make ARCH=arm64 LLVM=1 KERNELRELEASE="6.6.139-android15-8-g5fe428e1a8cef-ab10031985-4k" M=$PWD/../mods modules
+          echo '--- vermagic:'
+          strings ../mods/hello.ko | grep -m1 vermagic
+          ls -l ../mods/hello.ko
+
+      - name: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: module
+          path: mods/hello.ko
