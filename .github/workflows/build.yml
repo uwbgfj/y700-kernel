@@ -27,9 +27,9 @@ jobs:
 
       - name: 拉取内核源码
         run: |
-          git clone --depth 1 --branch android15-6.6.139_r00 \
+          git clone --depth 1 --branch android15-6.6-2026-07_r5 \
             https://android.googlesource.com/kernel/common kernel-src || \
-          git clone --depth 1 --branch android15-6.6.139_r00 \
+          git clone --depth 1 --branch android15-6.6-2026-07_r5 \
             https://mirrors.tuna.tsinghua.edu.cn/git/AOSP/kernel/common kernel-src
           cd kernel-src && grep -m1 '^SUBLEVEL' Makefile
 
