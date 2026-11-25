@@ -55,6 +55,7 @@ jobs:
           true
 
       - name: ksu
+        if: false
         run: |
           cd kernel-src
           git clone --depth 1 https://github.com/LyraVoid/FinaSU.git /tmp/finasu
@@ -67,9 +68,7 @@ jobs:
           grep -q 'kernelsu' drivers/Makefile || echo 'obj-$(CONFIG_KSU) += kernelsu/' >> drivers/Makefile
           sed -i 's/^ccflags-y += -DKSU_VERSION=16$/ccflags-y += -DKSU_VERSION=33224/' drivers/kernelsu/Kbuild
           sed -i 's/^KSU_VERSION_FULL := v0.0.0-00000000@unknown$/KSU_VERSION_FULL := v1.7.0-aa0000aa@finasu/' drivers/kernelsu/Kbuild
-          scripts/config --enable KSU --enable KALLSYMS_ALL
-          make ARCH=arm64 LLVM=1 olddefconfig >/dev/null
-          echo "KSU => $(grep -E '^CONFIG_KSU=' .config || echo none)"
+          true
 
       - name: inject-aa
         run: |
