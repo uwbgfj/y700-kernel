@@ -47,7 +47,6 @@ jobs:
           scripts/config --disable DEBUG_INFO_BTF_MODULES
           scripts/config --disable TRIM_UNUSED_KSYMS
           scripts/config --enable  MODULE_SCMVERSION
-          scripts/config --disable MODVERSIONS
           scripts/config --enable  CFI_CLANG
           make ARCH=arm64 LLVM=1 olddefconfig >/dev/null
           grep -E '^CONFIG_(LTO_NONE|CFI_CLANG|TRIM_UNUSED_KSYMS|MODULE_SCMVERSION)=' .config
@@ -81,12 +80,26 @@ jobs:
           }
           echo "injected"
 
+      - name: 放行任意 vermagic
+        run: |
+          cd kernel-src
+          python3 - <<'PY'
+          import re, pathlib
+          p = pathlib.Path('kernel/module/version.c')
+          s = p.read_text()
+          if 'aa: allow any vermagic' not in s:
+              s = s.replace("int same_magic(const char *amagic, const char *bmagic,\n\t       bool has_crcs)\n{",
+                            "int same_magic(const char *amagic, const char *bmagic,\n\t       bool has_crcs)\n{\n\treturn 1; /* aa: allow any vermagic */")
+              p.write_text(s)
+          print('same_magic patched:', 'aa: allow any vermagic' in p.read_text())
+          PY
+
       - name: 编译
         run: |
           cd kernel-src
           export PATH="$HOME/tc/clang18/bin:$PATH"
           make ARCH=arm64 LLVM=1 -j"$(nproc)" \
-            KERNELRELEASE="6.6.139-4k-g8040e0c4a2b1" \
+            KERNELRELEASE="6.6.139-android15-8-g5fe428e1a8cef-ab10031985-4k" \
             Image 2>&1 | tail -30
           ls -l arch/arm64/boot/Image
           strings arch/arm64/boot/Image | grep -m1 'aa: builtin ready' || echo "WARN no aa string"
