@@ -47,7 +47,7 @@ jobs:
           scripts/config --disable DEBUG_INFO_BTF_MODULES
           scripts/config --disable TRIM_UNUSED_KSYMS
           scripts/config --enable  MODULE_SCMVERSION
-          scripts/config --enable  MODVERSIONS
+          scripts/config --disable MODVERSIONS
           make ARCH=arm64 LLVM=1 olddefconfig >/dev/null
           for k in MODVERSIONS MODULE_SCMVERSION TRIM_UNUSED_KSYMS LTO_NONE CFI_CLANG; do
             echo "$k => $(grep -E "^CONFIG_${k}=" .config || echo none)"
