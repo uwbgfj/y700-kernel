@@ -80,20 +80,6 @@ jobs:
           }
           echo "injected"
 
-      - name: 放行任意 vermagic
-        run: |
-          cd kernel-src
-          python3 - <<'PY'
-          import re, pathlib
-          p = pathlib.Path('kernel/module/version.c')
-          s = p.read_text()
-          if 'aa: allow any vermagic' not in s:
-              s = s.replace("int same_magic(const char *amagic, const char *bmagic,\n\t       bool has_crcs)\n{",
-                            "int same_magic(const char *amagic, const char *bmagic,\n\t       bool has_crcs)\n{\n\treturn 1; /* aa: allow any vermagic */")
-              p.write_text(s)
-          print('same_magic patched:', 'aa: allow any vermagic' in p.read_text())
-          PY
-
       - name: 编译
         run: |
           cd kernel-src
