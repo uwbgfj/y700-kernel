@@ -47,6 +47,7 @@ jobs:
           scripts/config --disable DEBUG_INFO_BTF_MODULES
           scripts/config --disable TRIM_UNUSED_KSYMS
           scripts/config --enable  MODULE_SCMVERSION
+          scripts/config --disable MODVERSIONS
           scripts/config --enable  CFI_CLANG
           make ARCH=arm64 LLVM=1 olddefconfig >/dev/null
           grep -E '^CONFIG_(LTO_NONE|CFI_CLANG|TRIM_UNUSED_KSYMS|MODULE_SCMVERSION)=' .config
@@ -85,7 +86,7 @@ jobs:
           cd kernel-src
           export PATH="$HOME/tc/clang18/bin:$PATH"
           make ARCH=arm64 LLVM=1 -j"$(nproc)" \
-            KERNELRELEASE="6.6.139-android15-8-g5fe428e1a8cef-ab10031985-4k" \
+            KERNELRELEASE="6.6.139-4k-g8040e0c4a2b1" \
             Image 2>&1 | tail -30
           ls -l arch/arm64/boot/Image
           strings arch/arm64/boot/Image | grep -m1 'aa: builtin ready' || echo "WARN no aa string"
@@ -94,7 +95,9 @@ jobs:
       - name: 打印符号 CRC 表
         run: |
           cd kernel-src
-          python3 ../crc_step.py
+          echo '===SYMVERS_BEGIN==='
+          cat Module.symvers 2>/dev/null || echo 'NO_SYMVERS'
+          echo '===SYMVERS_END==='
 
       - name: 上传
         uses: actions/upload-artifact@v4
